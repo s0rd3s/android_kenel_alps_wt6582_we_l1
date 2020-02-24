@@ -2740,7 +2740,17 @@ static INT_32 wlanProbe(PVOID pvData)
 	P_ADAPTER_T prAdapter = NULL;
 	INT_32 i4Status = 0;
 	BOOLEAN bRet = FALSE;
+	enum probe_fail_reason {
+		BUS_INIT_FAIL,
+		NET_CREATE_FAIL,
+		BUS_SET_IRQ_FAIL,
+		ADAPTER_START_FAIL,
+		NET_REGISTER_FAIL,
+		PROC_INIT_FAIL,
+		FAIL_REASON_NUM
+	} eFailReason;
 
+	eFailReason = FAIL_REASON_NUM;
 	do {
 		/* 4 <1> Initialize the IO port of the interface */
 		/*  GeorgeKuo: pData has different meaning for _HIF_XXX:
@@ -2755,6 +2765,7 @@ static INT_32 wlanProbe(PVOID pvData)
 		if (FALSE == bRet) {
 			DBGLOG(INIT, ERROR, (KERN_ALERT "wlanProbe: glBusInit() fail\n"));
 			i4Status = -EIO;
+			eFailReason = BUS_INIT_FAIL;
 			break;
 		}
 		/* 4 <2> Create network device, Adapter, KalInfo, prDevHandler(netdev) */
@@ -2762,6 +2773,7 @@ static INT_32 wlanProbe(PVOID pvData)
 		if (prWdev == NULL) {
 			DBGLOG(INIT, ERROR, ("wlanProbe: No memory for dev and its private\n"));
 			i4Status = -ENOMEM;
+			eFailReason = NET_CREATE_FAIL;
 			break;
 		}
 		/* 4 <2.5> Set the ioaddr to HIF Info */
@@ -2787,6 +2799,7 @@ static INT_32 wlanProbe(PVOID pvData)
 
 		if (i4Status != WLAN_STATUS_SUCCESS) {
 			DBGLOG(INIT, ERROR, ("wlanProbe: Set IRQ error\n"));
+			eFailReason = BUS_SET_IRQ_FAIL;
 			break;
 		}
 
@@ -2884,9 +2897,16 @@ bailout:
 					/* CONSYS_REG_READ(CONSYS_CPUPCR_REG) */
 
 				/* dump HIF/DMA registers */
-				HifRegDump(prGlueInfo->prAdapter);
+				if (fgIsBusAccessFailed == FALSE) {
+					HifRegDump(prGlueInfo->prAdapter);
+				}
+				else {
+					/*dump HIF register may be hung while fgIsBusAccessFailed is TRUE*/
+					DBGLOG(INIT, ERROR, ("Bus read failed, we can not Run HifRegDump\n"));
+				}				
 /* if (prGlueInfo->rHifInfo.DmaOps->DmaRegDump != NULL) */
 /* prGlueInfo->rHifInfo.DmaOps->DmaRegDump(&prGlueInfo->rHifInfo); */
+				eFailReason = ADAPTER_START_FAIL;
 				break;
 			}
 		}
@@ -2902,6 +2922,7 @@ bailout:
 
 		if (wlanAdapterStart(prAdapter, prRegInfo, NULL, 0) != WLAN_STATUS_SUCCESS) {
 			i4Status = -EIO;
+			eFailReason = ADAPTER_START_FAIL;
 			break;
 		}
 #endif
@@ -2989,6 +3010,7 @@ bailout:
 		if (i4DevIdx < 0) {
 			i4Status = -ENXIO;
 			DBGLOG(INIT, ERROR, ("wlanProbe: Cannot register the net_device context to the kernel\n"));
+			eFailReason = NET_REGISTER_FAIL;
 			break;
 		}
 
@@ -2999,6 +3021,7 @@ bailout:
 		i4Status = procInitProcfs(gPrDev, NIC_DEVICE_ID_LOW);
 		if (i4Status < 0) {
 			DBGLOG(INIT, ERROR, ("wlanProbe: init procfs failed\n"));
+			eFailReason = PROC_INIT_FAIL;
 			break;
 		}
 #endif /* WLAN_INCLUDE_PROC */
@@ -3026,11 +3049,32 @@ bailout:
 #endif
 	} while (FALSE);
 
-	if (i4Status != WLAN_STATUS_SUCCESS) {
-		KAL_WAKE_LOCK_DESTROY(prGlueInfo->prAdapter, &prGlueInfo->rAhbIsrWakeLock);
-		if (prWdev != NULL)
-			glBusFreeIrq(prWdev->netdev, *((P_GLUE_INFO_T *) netdev_priv(prWdev->netdev)));
-	}
+    if (i4Status != WLAN_STATUS_SUCCESS)
+	{
+		switch (eFailReason)
+		{
+		case PROC_INIT_FAIL:
+			wlanNetUnregister(prWdev);
+		case NET_REGISTER_FAIL:
+			set_bit(GLUE_FLAG_HALT_BIT, &prGlueInfo->ulFlag);
+			/* wake up main thread */
+		    wake_up_interruptible(&prGlueInfo->waitq);
+			/* wait main thread stops */
+		    wait_for_completion_interruptible(&prGlueInfo->rHaltComp);
+        	KAL_WAKE_LOCK_DESTROY(prGlueInfo->prAdapter, &prGlueInfo->rAhbIsrWakeLock);
+			wlanAdapterStop(prAdapter);
+		case ADAPTER_START_FAIL:
+        	if (prWdev != NULL)
+            	glBusFreeIrq(prWdev->netdev, *((P_GLUE_INFO_T *) netdev_priv(prWdev->netdev)));
+		case BUS_SET_IRQ_FAIL:
+			KAL_WAKE_LOCK_DESTROY(prAdapter, &prGlueInfo->rAhbIsrWakeLock);
+			wlanNetDestroy(prWdev);
+		case NET_CREATE_FAIL:
+		case BUS_INIT_FAIL:
+		default:
+			break;
+		}
+    }
 #if CFG_ENABLE_WIFI_DIRECT
 	{
 		GLUE_SPIN_LOCK_DECLARATION();
@@ -3045,13 +3089,27 @@ bailout:
 		kalIndicateAgpsNotify(prAdapter, AGPS_EVENT_WLAN_ON, NULL, 0);
 #endif
 #if (CFG_SUPPORT_MET_PROFILING == 1)
-	DBGLOG(INIT, TRACE, ("init MET procfs...\n"));
-	printk("MET_PROF: MET PROCFS init....\n");
-	i4Status = kalMetInitProcfs(prGlueInfo);
-	if (i4Status < 0)
-		DBGLOG(INIT, ERROR, ("wlanProbe: init MET procfs failed\n"));
+	{
+		int iMetInitRet = WLAN_STATUS_FAILURE;
+		if (i4Status == WLAN_STATUS_SUCCESS)
+		{
+			DBGLOG(INIT, TRACE, ("init MET procfs...\n"));
+			iMetInitRet = kalMetInitProcfs(prGlueInfo);
+    		if (iMetInitRet < 0)
+			{
+				DBGLOG(INIT, ERROR, ("wlanProbe: init MET procfs failed\n"));
+			}
+    	}
+	}
 #endif
-	DBGLOG(INIT, TRACE, ("wlanProbe ok\n"));
+	if (i4Status == WLAN_STATUS_SUCCESS) {
+		/* probe ok */
+		DBGLOG(INIT, TRACE, ("wlanProbe ok\n"));
+	} else {
+		/* probe failed */
+		DBGLOG(INIT, ERROR, ("wlanProbe failed\n"));
+	}
+
 	return i4Status;
 }				/* end of wlanProbe() */
 
@@ -3273,8 +3331,8 @@ static int initWlan(void)
 		aucDebugModule[i] = DBG_CLASS_ERROR |
 		    DBG_CLASS_WARN | DBG_CLASS_STATE | DBG_CLASS_EVENT | DBG_CLASS_TRACE | DBG_CLASS_INFO;
 	}
-	aucDebugModule[DBG_TX_IDX] &= ~(DBG_CLASS_EVENT | DBG_CLASS_TRACE | DBG_CLASS_INFO);
-	aucDebugModule[DBG_RX_IDX] &= ~(DBG_CLASS_EVENT | DBG_CLASS_TRACE | DBG_CLASS_INFO);
+	aucDebugModule[DBG_TX_IDX] &= ~(DBG_CLASS_EVENT | DBG_CLASS_TRACE);
+	aucDebugModule[DBG_RX_IDX] &= ~(DBG_CLASS_EVENT | DBG_CLASS_TRACE);
 	aucDebugModule[DBG_REQ_IDX] &= ~(DBG_CLASS_EVENT | DBG_CLASS_TRACE | DBG_CLASS_INFO);
 	aucDebugModule[DBG_INTR_IDX] = 0;
 	aucDebugModule[DBG_MEM_IDX] = 0;

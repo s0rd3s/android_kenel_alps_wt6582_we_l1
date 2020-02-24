@@ -1603,6 +1603,7 @@ WLAN_STATUS nicTxCmd(IN P_ADAPTER_T prAdapter, IN P_CMD_INFO_T prCmdInfo, IN UIN
 		rHwTxHeader.u2SeqNo = 0;
 		rHwTxHeader.ucPacketSeqNo = 0;
 		rHwTxHeader.ucAck_BIP_BasicRate = HIF_TX_HDR_NEED_TX_DONE_STATUS;
+        rHwTxHeader.ucAck_BIP_BasicRate |= HIF_TX_HDR_BASIC_RATE /* | HIF_TX_HDR_RTS */;
 
 		/* <2.3> Copy HIF TX HEADER */
 		kalMemCopy((PVOID) & pucOutputBuf[0], (PVOID) & rHwTxHeader, TX_HDR_SIZE);
@@ -1887,8 +1888,10 @@ VOID nicTxReturnMsduInfo(IN P_ADAPTER_T prAdapter, IN P_MSDU_INFO_T prMsduInfoLi
 			break;
 		}
 
+		/* Reset MSDU_INFO fields */
+		kalMemZero(prMsduInfo, sizeof(MSDU_INFO_T));
+
 		KAL_ACQUIRE_SPIN_LOCK(prAdapter, SPIN_LOCK_TX_MSDU_INFO_LIST);
-		prMsduInfo->fgIsBasicRate = FALSE;
 		QUEUE_INSERT_TAIL(&prTxCtrl->rFreeMsduInfoList, (P_QUE_ENTRY_T) prMsduInfo);
 		KAL_RELEASE_SPIN_LOCK(prAdapter, SPIN_LOCK_TX_MSDU_INFO_LIST);
 		prMsduInfo = prNextMsduInfo;
@@ -1917,10 +1920,10 @@ BOOLEAN nicTxFillMsduInfo(IN P_ADAPTER_T prAdapter, IN P_MSDU_INFO_T prMsduInfo,
 	UINT_8 aucEthDestAddr[PARAM_MAC_ADDR_LEN];
 	BOOLEAN fgIs1x = FALSE;
 	BOOLEAN fgIsPAL = FALSE;
-	BOOLEAN fgIsNeedAck = FALSE;
 	UINT_32 u4PacketLen;
 	ULONG u4SysTime;
 	UINT_8 ucNetworkType;
+    struct sk_buff *prSkb = (struct sk_buff *)prPacket;
 
 	ASSERT(prAdapter);
 
@@ -1932,7 +1935,7 @@ BOOLEAN nicTxFillMsduInfo(IN P_ADAPTER_T prAdapter, IN P_MSDU_INFO_T prMsduInfo,
 					       &ucPriorityParam,
 					       &u4PacketLen,
 					       aucEthDestAddr,
-					       &fgIs1x, &fgIsPAL, &fgIsNeedAck, &ucNetworkType) == FALSE) {
+					       &fgIs1x, &fgIsPAL, &ucNetworkType) == FALSE) {
 		return FALSE;
 	}
 #if CFG_ENABLE_PKT_LIFETIME_PROFILE
@@ -1969,10 +1972,8 @@ BOOLEAN nicTxFillMsduInfo(IN P_ADAPTER_T prAdapter, IN P_MSDU_INFO_T prMsduInfo,
 	prMsduInfo->u2FrameLength = (UINT_16) u4PacketLen;
 	COPY_MAC_ADDR(prMsduInfo->aucEthDestAddr, aucEthDestAddr);
 
-	if (fgIsNeedAck == TRUE)
-		prMsduInfo->fgNeedTxDoneStatus = TRUE;
-	else
-		prMsduInfo->fgNeedTxDoneStatus = FALSE;
+	if (prSkb->len > ETH_HLEN)
+		STATS_TX_PKT_CALLBACK(prSkb->data, prMsduInfo);
 
 	return TRUE;
 }

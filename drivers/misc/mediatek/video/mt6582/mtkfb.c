@@ -158,7 +158,6 @@ extern disp_session_config disp_config;
 //  local function declarations
 // ---------------------------------------------------------------------------
 
-static int init_framebuffer(struct fb_info *info);
 static int mtkfb_set_overlay_layer(struct fb_info *info,
                                    struct fb_overlay_layer* layerInfo,
                                    unsigned int locked);
@@ -1424,70 +1423,6 @@ static int mtkfb_auto_capture_framebuffer(struct fb_info *info,struct fb_slt_cat
 
     return ret;
 }
-static int mtkfb_capture_framebuffer(struct fb_info *info, unsigned int pvbuf)
-{
-    int ret = 0;
-    MMProfileLogEx(MTKFB_MMP_Events.CaptureFramebuffer, MMProfileFlagStart, pvbuf, 0);
-    if (down_interruptible(&sem_flipping)) {
-        MTKFB_WRAN("[FB Driver] can't get semaphore:%d\n", __LINE__);
-        MMProfileLogEx(MTKFB_MMP_Events.CaptureFramebuffer, MMProfileFlagEnd, 0, 1);
-        return -ERESTARTSYS;
-    }
-    sem_flipping_cnt--;
-    mutex_lock(&ScreenCaptureMutex);
-
-    /** LCD registers can't be R/W when its clock is gated in early suspend
-        mode; power on/off LCD to modify register values before/after func.
-    */
-    if (is_early_suspended)
-    {
-        memset((void*)pvbuf, 0, DISP_GetScreenWidth()*DISP_GetScreenHeight()*info->var.bits_per_pixel/8);
-        goto EXIT;
-    }
-
-    if (atomic_read(&capture_ui_layer_only))
-    {
-        unsigned int w_xres = (unsigned short)fb_layer_context.src_width;
-        unsigned int h_yres = (unsigned short)fb_layer_context.src_height;
-        unsigned int pixel_bpp = info->var.bits_per_pixel / 8; // bpp is either 32 or 16, can not be other value
-        unsigned int w_fb = (unsigned int)fb_layer_context.src_pitch;
-        unsigned int fbsize = w_fb * h_yres * pixel_bpp; // frame buffer size
-        unsigned int fbaddress = info->fix.smem_start + info->var.yoffset * info->fix.line_length; //physical address
-        unsigned int mem_off_x = (unsigned short)fb_layer_context.src_offset_x;
-        unsigned int mem_off_y = (unsigned short)fb_layer_context.src_offset_y;
-        unsigned int fbv = 0;
-        fbaddress += (mem_off_y * w_fb + mem_off_x) * pixel_bpp;
-        fbv = (unsigned int)ioremap_nocache(fbaddress, fbsize);
-        MTKFB_INFO("[FB Driver], w_xres = %d, h_yres = %d, w_fb = %d, pixel_bpp = %d, fbsize = %d, fbaddress = 0x%08x\n", w_xres, h_yres, w_fb, pixel_bpp, fbsize, fbaddress);
-        if (!fbv)
-        {
-            MTKFB_WRAN("[FB Driver], Unable to allocate memory for frame buffer: address=0x%08x, size=0x%08x\n", \
-                    fbaddress, fbsize);
-            goto EXIT;
-        }
-        {
-            unsigned int i;
-            for(i = 0;i < h_yres; i++)
-            {
-                memcpy((void *)(pvbuf + i * w_xres * pixel_bpp), (void *)(fbv + i * w_fb * pixel_bpp), w_xres * pixel_bpp);
-            }
-        }
-        iounmap((void *)fbv);
-    }
-    else
-        DISP_Capture_Framebuffer(pvbuf, info->var.bits_per_pixel, is_early_suspended);
-
-
-EXIT:
-
-    mutex_unlock(&ScreenCaptureMutex);
-    sem_flipping_cnt++;
-    up(&sem_flipping);
-    MSG_FUNC_LEAVE();
-    MMProfileLogEx(MTKFB_MMP_Events.CaptureFramebuffer, MMProfileFlagEnd, 0, 0);
-
-    return ret;
-}
 
 
 #include <linux/aee.h>
@@ -1639,22 +1574,6 @@ static int mtkfb_ioctl(struct file *file, struct fb_info *info, unsigned int cmd
         ret = DISP_ConfigImmediateUpdate((BOOL)arg);
 		sem_early_suspend_cnt++;
 		up(&sem_early_suspend);
-        return (r);
-    }
-
-    case MTKFB_CAPTURE_FRAMEBUFFER:
-    {
-        unsigned int pbuf = 0;
-        if (copy_from_user(&pbuf, (void __user *)arg, sizeof(pbuf)))
-        {
-            MTKFB_WRAN("[FB]: copy_from_user failed! line:%d \n", __LINE__);
-            r = -EFAULT;
-        }
-        else
-        {
-            mtkfb_capture_framebuffer(info, pbuf);
-        }
-
         return (r);
     }
 
@@ -1867,18 +1786,6 @@ static int mtkfb_ioctl(struct file *file, struct fb_info *info, unsigned int cmd
 		hdmi_setorientation((int)arg);
 #endif
         return 0;
-    }
-    case MTKFB_META_RESTORE_SCREEN:
-    {
-        struct fb_var_screeninfo var;
-
-		if (copy_from_user(&var, argp, sizeof(var)))
-			return -EFAULT;
-
-        info->var.yoffset = var.yoffset;
-        init_framebuffer(info);
-
-        return mtkfb_pan_display_impl(&var, info);
     }
 
 	case MTKFB_GET_INTERFACE_TYPE:
@@ -2447,18 +2354,6 @@ int m4u_reclaim_mva_callback_ovl(int moduleID, unsigned int va, unsigned int siz
      (((x) &  0x7E0) << 5) | (((x) & 0x600) >> 1) |   \
      (((x) & 0xF800) << 8) | (((x) & 0xE000) << 3) |   \
      (0xFF << 24)) // opaque
-
-/* Init frame buffer content as 3 R/G/B color bars for debug */
-static int init_framebuffer(struct fb_info *info)
-{
-    void *buffer = info->screen_base +
-                   info->var.yoffset * info->fix.line_length;
-
-    // clean whole frame buffer as black
-    memset(buffer, 0, info->screen_size);
-
-    return 0;
-}
 
 
 /* Free driver resources. Can be called to rollback an aborted initialization

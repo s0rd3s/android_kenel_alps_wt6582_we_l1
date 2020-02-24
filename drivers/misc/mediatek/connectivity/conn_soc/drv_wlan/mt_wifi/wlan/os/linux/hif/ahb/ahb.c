@@ -983,6 +983,10 @@ BOOLEAN kalDevRegRead(IN GLUE_INFO_T *GlueInfo, IN UINT_32 RegOffset, OUT UINT_3
 	HifInfo = &GlueInfo->rHifInfo;
 
 	/* use PIO mode to read register */
+	if (WlanDmaFatalErr && RegOffset != MCR_WCIR && RegOffset != MCR_WHLPCR)
+	{
+		return FALSE;
+	}
 	*pu4Value = HIF_REG_READL(HifInfo, RegOffset);
 
 	if ((RegOffset == MCR_WRDR0) || (RegOffset == MCR_WRDR1))
@@ -1013,6 +1017,10 @@ BOOLEAN kalDevRegWrite(IN GLUE_INFO_T *GlueInfo, IN UINT_32 RegOffset, IN UINT_3
 	HifInfo = &GlueInfo->rHifInfo;
 
 	/* use PIO mode to write register */
+	if (WlanDmaFatalErr && RegOffset != MCR_WCIR && RegOffset != MCR_WHLPCR)
+	{
+		return FALSE;
+	}
 	HIF_REG_WRITEL(HifInfo, RegOffset, RegValue);
 
 	if ((RegOffset == MCR_WTDR0) || (RegOffset == MCR_WTDR1))
@@ -1070,7 +1078,7 @@ kalDevPortRead(IN GLUE_INFO_T *GlueInfo, IN UINT_16 Port, IN UINT_16 Size, OUT P
 		}
 #endif /* CONF_HIF_CONNSYS_DBG */
 
-		return TRUE;
+		return FALSE;
 	}
 
 	/* Init */
@@ -1184,7 +1192,15 @@ kalDevPortRead(IN GLUE_INFO_T *GlueInfo, IN UINT_16 Port, IN UINT_16 Size, OUT P
 				 */
 				printk("DMA LoopCnt > 100000... (%lu %lu)\n", jiffies, PollTimeout);
 /* LabelErr: */
-				HifRegDump(GlueInfo->prAdapter);
+				{
+					UINT_32 uwcir = 0;
+					UINT_32 uwhlpcr = 0;
+
+					uwcir = (UINT_32)HIF_REG_READL(HifInfo, MCR_WCIR);
+					uwhlpcr = (UINT_32)HIF_REG_READL(HifInfo, MCR_WHLPCR);
+					printk("addr MCR_WCIR is %u, addr MCR_WHLPCR is %u\n", uwcir, uwhlpcr);
+				}
+
 				if (HifInfo->DmaOps->DmaRegDump != NULL)
 					HifInfo->DmaOps->DmaRegDump(HifInfo);
 
@@ -1241,7 +1257,7 @@ kalDevPortRead(IN GLUE_INFO_T *GlueInfo, IN UINT_16 Port, IN UINT_16 Size, OUT P
 					/* re-dump HIF registers */
 					HifRegDump(GlueInfo->prAdapter);
 #endif
-					return TRUE;
+					return FALSE;
 				}
 #endif /* CONF_HIF_DMA_DBG */
 #endif /* CONF_HIF_CONNSYS_DBG */
@@ -1344,7 +1360,7 @@ kalDevPortWrite(IN GLUE_INFO_T *GlueInfo, IN UINT_16 Port, IN UINT_16 Size, IN P
 		}
 #endif /* CONF_HIF_CONNSYS_DBG */
 
-		return TRUE;
+		return FALSE;
 	}
 
 	/* Init */
@@ -1472,7 +1488,14 @@ kalDevPortWrite(IN GLUE_INFO_T *GlueInfo, IN UINT_16 Port, IN UINT_16 Size, IN P
 
 				printk("DMA LoopCnt > 100000... (%lu %lu)\n", jiffies, PollTimeout);
 /* LabelErr: */
-				HifRegDump(GlueInfo->prAdapter);
+				{
+					UINT_32 uwcir = 0;
+					UINT_32 uwhlpcr = 0;
+
+					uwcir = (UINT_32)HIF_REG_READL(HifInfo, MCR_WCIR);
+					uwhlpcr = (UINT_32)HIF_REG_READL(HifInfo, MCR_WHLPCR);
+					printk("addr MCR_WCIR is %u, addr MCR_WHLPCR is %u\n", uwcir, uwhlpcr);
+				}
 				if (HifInfo->DmaOps->DmaRegDump != NULL)
 					HifInfo->DmaOps->DmaRegDump(HifInfo);
 				LoopCnt = 0;
@@ -1508,7 +1531,7 @@ kalDevPortWrite(IN GLUE_INFO_T *GlueInfo, IN UINT_16 Port, IN UINT_16 Size, IN P
 						(UINT_32) RegValChip, (UINT_32) RegValLP);
 					kalSendAeeWarning(AeeBuffer, "", "");
 #endif
-					return TRUE;
+					return FALSE;
 				}
 #endif /* CONF_HIF_DMA_DBG */
 #endif /* CONF_HIF_CONNSYS_DBG */

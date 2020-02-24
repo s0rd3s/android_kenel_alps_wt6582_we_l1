@@ -2227,7 +2227,7 @@ kalQoSFrameClassifierAndPacketInfo(IN P_GLUE_INFO_T prGlueInfo,
 				   OUT PUINT_32 pu4PacketLen,
 				   OUT PUINT_8 pucEthDestAddr,
 				   OUT PBOOLEAN pfgIs1X,
-				   OUT PBOOLEAN pfgIsPAL, OUT PBOOLEAN pfgIsNeedAck, OUT PUINT_8 pucNetworkType)
+				   OUT PBOOLEAN pfgIsPAL, OUT PUINT_8 pucNetworkType)
 {
 
 	UINT_32 u4PacketLen;
@@ -2253,21 +2253,6 @@ kalQoSFrameClassifierAndPacketInfo(IN P_GLUE_INFO_T prGlueInfo,
 
 	/* 4 <3> Obtain the User Priority for WMM */
 	u2EtherTypeLen = (aucLookAheadBuf[ETH_TYPE_LEN_OFFSET] << 8) | (aucLookAheadBuf[ETH_TYPE_LEN_OFFSET + 1]);
-
-	STATS_TX_PKT_INFO_DISPLAY(aucLookAheadBuf, pfgIsNeedAck);
-
-#if 0
-	if (u2EtherTypeLen == ETH_P_ARP) {
-		UINT_8 *pucDstIp = &aucLookAheadBuf[ETH_HLEN];
-		if (pucDstIp[7] == ARP_PRO_REQ) {
-			DBGLOG(INIT, TRACE, ("<tx> OS tx a arp req to %d.%d.%d.%d\n",
-					     pucDstIp[24], pucDstIp[25], pucDstIp[26], pucDstIp[27]));
-		} else if (pucDstIp[7] == ARP_PRO_RSP) {
-			DBGLOG(INIT, TRACE, ("<tx> OS tx a arp rsp to %d.%d.%d.%d\n",
-					     pucDstIp[14], pucDstIp[15], pucDstIp[16], pucDstIp[17]));
-		}
-	}
-#endif
 
 	if ((u2EtherTypeLen == ETH_P_IP) && (u4PacketLen >= LOOK_AHEAD_LEN)) {
 		PUINT_8 pucIpHdr = &aucLookAheadBuf[ETH_HLEN];

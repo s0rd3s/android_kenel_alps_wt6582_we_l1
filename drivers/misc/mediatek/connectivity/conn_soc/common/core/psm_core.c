@@ -893,6 +893,7 @@ static inline INT32 _stp_psm_wait_wmt_event_wq(MTKSTP_PSM_T *stp_psm)
 		} else {
 			STP_PSM_ERR_FUNC("flag = %ld<== Abnormal flag be set!!\n\r", stp_psm->flag.data);
 			STP_PSM_ERR_FUNC("state = %d, flag = %ld\n", stp_psm->work_state, stp_psm->flag.data);
+			wcn_psm_flag_trigger_collect_ftrace();	/* trigger collect SYS_FTRACE */
 			_stp_psm_dbg_out_printk(g_stp_psm_dbg);
 		}
 		retval = STP_PSM_OPERATION_SUCCESS;
@@ -1255,7 +1256,7 @@ static inline INT32 _stp_psm_do_wakeup(MTKSTP_PSM_T *stp_psm)
 	while (!RB_EMPTY(&stp_psm->rActiveOpQ)) {
 		RB_GET(&stp_psm->rActiveOpQ, pOp);
 		if (NULL != pOp && !RB_FULL(pOpQ)) {
-			STP_PSM_DBG_FUNC("opid = %d\n", pOp->op.opId);
+            STP_PSM_INFO_FUNC("opid = %d\n", pOp->op.opId);
 			RB_PUT(pOpQ, pOp);
 		} else {
 			STP_PSM_ERR_FUNC("clear up active queue fail, freeQ full\n");
