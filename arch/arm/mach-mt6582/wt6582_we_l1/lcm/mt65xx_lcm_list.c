@@ -18,6 +18,10 @@
 #define LCD_DEBUG(fmt)  printk(fmt)
 #endif
 
+extern LCM_DRIVER ili9806e_dsi_vdo_lcm_drv_tcl;
+extern LCM_DRIVER ili9806e_dsi_vdo_lcm_drv_yassy;
+extern LCM_DRIVER hx8379c_wvga_dsi_vdo_lcm_drv;
+extern LCM_DRIVER nt35512_wvga_dsi_vdo_lcm_drv;
 extern LCM_DRIVER lp079x01_lcm_drv;
 extern LCM_DRIVER hx8369_lcm_drv;
 extern LCM_DRIVER hx8369_6575_lcm_drv;
@@ -134,7 +138,17 @@ extern LCM_DRIVER nt35521_hd720_dsi_vdo_boe_lcm_drv;
 extern LCM_DRIVER nt35521_hd720_tm_lcm_drv;
 
 LCM_DRIVER* lcm_driver_list[] = 
-{ 
+{
+#if defined(ILI9806E_DSI_VDO)
+&ili9806e_dsi_vdo_lcm_drv_tcl,
+&ili9806e_dsi_vdo_lcm_drv_yassy,
+#endif
+#if defined(HX8379C_WVGA_DSI_VDO)
+	&hx8379c_wvga_dsi_vdo_lcm_drv,
+#endif
+#if defined(NT35512_WVGA_DSI_VDO)
+	&nt35512_wvga_dsi_vdo_lcm_drv,
+#endif 
 #if defined(NT35517_QHD_DSI_VDO)
 	&nt35517_dsi_vdo_lcm_drv,
 #endif

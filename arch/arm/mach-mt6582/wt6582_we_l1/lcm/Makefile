@@ -17,4 +17,14 @@ endif
 
 ifeq ($(CONFIG_CUSTOM_KERNEL_LCM),"nt35590_hd720_dsi_cmd_auo_qhd")
 obj-y   +=  nt35590_hd720_dsi_cmd_auo_qhd.o
+
+ifeq ($(CONFIG_CUSTOM_KERNEL_LCM),"ili9806e_dsi_vdo")
+obj-y   +=  ili9806e_dsi_vdo.o
+
+ifeq ($(CONFIG_CUSTOM_KERNEL_LCM),"hx8379c_wvga_dsi_vdo")
+obj-y   +=  hx8379c_wvga_dsi_vdo.o
+
+ifeq ($(CONFIG_CUSTOM_KERNEL_LCM),"nt35512_wvga_dsi_vdo")
+obj-y   +=  nt35512_wvga_dsi_vdo.o
+
 endif
